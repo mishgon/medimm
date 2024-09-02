@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "medimm"
+version = "0.0.0"
+dynamic = ["dependencies"]
+requires-python = ">=3.10"
+authors = [
+  { name = "List of contributors: https://github.com/mishgon/medimm/graphs/contributors", email = "Mikhail.Goncharov2@skoltech.ru" },
+]
+description = "PyTorch Medical 3D Image Models"
+readme = "README.md"
+license = {file = "LICENSE"}
+keywords=["medical computer vision", "deep learning", "pytorch"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Education",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/mishgon/medimm"
+Issues = "https://github.com/mishgon/medimm/issues"
+
+[tool.setuptools]
+packages = ["medimm"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
