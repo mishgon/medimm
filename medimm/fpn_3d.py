@@ -18,6 +18,7 @@ class Stem3d(nn.Module):
             kernel_size: int,
             stride: Union[int, Tuple[int, int, int]],
             padding: int,
+            mask_token: bool = False
     ) -> None:
         super().__init__()
 
@@ -26,10 +27,15 @@ class Stem3d(nn.Module):
         self.conv = nn.Conv3d(in_channels, out_channels - 1, kernel_size, stride, padding)
         self.norm = LayerNorm3d(out_channels - 1)
         self.stride = stride
+        if mask_token:
+            self.mask_token = nn.Parameter(torch.zeros(out_channels - 1))
+            nn.init.trunc_normal_(self.mask_token)
+        else:
+            self.mask_token = None
 
-    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, image: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         if mask is None:
-            x = self.conv(x)
+            x = self.conv(image)
             x = self.norm(x)
             n, _, h, w, d = x.shape
             mask = torch.ones((n, 1, h, w, d), dtype=x.dtype, device=x.device)
@@ -37,10 +43,13 @@ class Stem3d(nn.Module):
             return x
         else:
             mask = mask.unsqueeze(1)
-            x = self.conv(x * mask)
+            x = self.conv(image * mask)
             mask = F.max_pool3d(mask, kernel_size=self.stride)
-            noise = torch.randn_like(x)
-            x = x * mask + noise * (1 - mask)
+            if self.mask_token is not None:
+                fill_values = self.mask_token.view(-1, 1, 1, 1)
+            else:
+                fill_values = torch.randn_like(x)
+            x = x * mask + fill_values * (1 - mask)
             x = self.norm(x)
             x = torch.cat([x, mask], dim=1)
             return x
@@ -125,19 +134,20 @@ class ConvNeXtStage3d(nn.Module):
         return x
 
 
-class UNet3d(nn.Module):
+class FPN3d(nn.Module):
     def __init__(
             self,
             in_channels: int,
+            stem_stride: Union[int, Tuple[int, int, int]],
             out_channels: Sequence[int],
             depths: Sequence[Union[int, Tuple[int, int]]],
-            stem_stride: Union[int, Tuple[int, int, int]],
             stem_kernel_size: Optional[Union[int, Tuple[int, int, int]]] = None,
             stem_padding: Union[int, Tuple[int, int, int]] = 0,
             drop_path_rate: float = 0.0,
             final_ln: bool = True,
             final_affine: bool = True,
             final_gelu: bool = False,
+            mask_token: bool = False,
             **convnext_block_kwargs: Any
     ) -> None:
         super().__init__()
@@ -155,7 +165,8 @@ class UNet3d(nn.Module):
         drop_path_rates = torch.linspace(0, drop_path_rate, sum(left_depths)).split(left_depths)
         drop_path_rates = [dp_rates.tolist() for dp_rates in drop_path_rates]
 
-        self.stem = Stem3d(in_channels, out_channels[0], stem_kernel_size, stem_stride, stem_padding)
+        self.stem = Stem3d(in_channels, out_channels[0], stem_kernel_size,
+                           stem_stride, stem_padding, mask_token)
         self.left_stages = nn.ModuleList([])
         self.middle_norms = nn.ModuleList([])
         self.down_blocks = nn.ModuleList([])
@@ -187,38 +198,167 @@ class UNet3d(nn.Module):
         self.stem_stride = stem_stride
         self.max_stride = tuple(s * 2 ** len(self.down_blocks) for s in stem_stride)
 
-    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> List[torch.Tensor]:
-        if any(x.shape[i] < self.max_stride[i] for i in [-3, -2, -1]):
+    def forward(self, image: torch.Tensor, mask: Optional[torch.Tensor] = None) -> List[torch.Tensor]:
+        if any(image.shape[i] < self.max_stride[i] for i in [-3, -2, -1]):
             raise ValueError(f"Input's spatial size {x.shape[-3:]} is less than {self.max_stride}.")
 
         if mask is not None and mask.dtype != x.dtype:
             raise TypeError("``mask`` must have the same dtype as input image ``x``")
 
         # stem
-        x = self.stem(x, mask)
+        x = self.stem(image, mask)
 
         # UNet's down path
-        pyramid = []
+        feature_pyramid = []
         for i in range(len(self.down_blocks)):
             x = self.left_stages[i](x)
             x = self.middle_norms[i](x)
-            pyramid.append(x)
+            feature_pyramid.append(x)
             x = self.down_blocks[i](x)
 
         # UNet's bottom layers
         x = self.bottom_stage(x)
-        pyramid.append(self.final_acts[-1](self.final_norms[-1](x)))
+        feature_pyramid.append(self.final_acts[-1](self.final_norms[-1](x)))
 
         # UNet's up path
         for i in reversed(range(len(self.up_blocks))):
             x = self.up_blocks[i](x)
-            y = self.skip_connections[i](pyramid[i])
+            y = self.skip_connections[i](feature_pyramid[i])
             x = crop_and_pad_to(x, y)
             x = x + y
             x = self.right_stages[i](x)
-            pyramid[i] = self.final_acts[i](self.final_norms[i](x))
+            feature_pyramid[i] = self.final_acts[i](self.final_norms[i](x))
 
-        return pyramid
+        return feature_pyramid
+
+
+class FPNDenseHead3d(nn.Module):
+    """Inspired by http://presentations.cocodataset.org/COCO17-Stuff-FAIR.pdf
+    """
+    def __init__(
+            self,
+            out_channels: int,
+            fpn_stem_stride: Union[int, Tuple[int, int, int]],
+            fpn_out_channels: Sequence[int],
+            hidden_channels: int,
+    ) -> None:
+        super().__init__()
+
+        if isinstance(fpn_stem_stride, int):
+            fpn_stem_stride = (fpn_stem_stride, fpn_stem_stride, fpn_stem_stride)
+        self.fpn_stem_stride = tuple(fpn_stem_stride)
+
+        self.lateral_convs = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv3d(c, hidden_channels, kernel_size=1),
+                LayerNorm3d(hidden_channels),
+                nn.GELU()
+            )
+            for c in fpn_out_channels
+        ])
+        self.stages = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv3d(hidden_channels, hidden_channels, kernel_size=3, padding=1),
+                LayerNorm3d(hidden_channels),
+                nn.GELU(),
+                nn.Conv3d(hidden_channels, hidden_channels, kernel_size=3, padding=1),
+                LayerNorm3d(hidden_channels),
+                nn.GELU(),
+            )
+            for _ in range(len(fpn_out_channels))
+        ])
+        self.final_convs = nn.ModuleList([
+            nn.Conv3d(hidden_channels, out_channels, kernel_size=1, bias=(i == 0))
+            for i in range(len(fpn_out_channels))
+        ])
+        d = hidden_channels * len(fpn_out_channels)
+        for conv in self.final_convs:
+            nn.init.uniform_(conv.weight, -(1. / d) ** 0.5, (1. / d) ** 0.5)
+        nn.init.uniform_(self.final_convs[0].bias, -(1. / d) ** 0.5, (1. / d) ** 0.5)
+
+    def forward(
+            self,
+            image: torch.Tensor,
+            feature_pyramid: Sequence[torch.Tensor],
+            upsample: bool = True
+    ) -> torch.Tensor:
+        assert len(feature_pyramid) == len(self.lateral_convs)
+
+        feature_pyramid = [conv(x) for x, conv in zip(feature_pyramid, self.lateral_convs)]
+
+        for i in reversed(range(len(feature_pyramid) - 1)):
+            x = F.interpolate(feature_pyramid[i + 1], scale_factor=2)
+            y = feature_pyramid[i]
+            feature_pyramid[i] = y + crop_and_pad_to(x, y)
+
+        feature_pyramid = [conv(stage(x)) for x, stage, conv in zip(feature_pyramid, self.stages, self.final_convs)]
+
+        x = feature_pyramid.pop()
+        while feature_pyramid:
+            x = F.interpolate(x, scale_factor=2, mode='trilinear')
+            y = feature_pyramid.pop()
+            x = crop_and_pad_to(x, y)
+            x = x + y
+
+        if not upsample:
+            return x
+
+        # upsample and pad logits to the original images' spatial resolution
+        x = F.interpolate(x, scale_factor=self.fpn_stem_stride, mode='trilinear')
+        if x.shape[2:] != image.shape[2:]:
+            x = crop_and_pad_to(x, image)
+
+        return x
+
+
+class FPNLinearDenseHead3d(nn.Module):
+    def __init__(
+            self,
+            out_channels: int,
+            fpn_stem_stride: int,
+            fpn_out_channels: Sequence[int],
+    ) -> None:
+        super().__init__()
+
+        if isinstance(fpn_stem_stride, int):
+            fpn_stem_stride = (fpn_stem_stride, fpn_stem_stride, fpn_stem_stride)
+        self.fpn_stem_stride = tuple(fpn_stem_stride)
+
+        self.convs = nn.ModuleList([
+            nn.Conv3d(c, out_channels, kernel_size=1, bias=(i == 0))
+            for i, c in enumerate(fpn_out_channels)
+        ])
+        d = sum(fpn_out_channels)
+        for conv in self.convs:
+            nn.init.uniform_(conv.weight, -(1. / d) ** 0.5, (1. / d) ** 0.5)
+        nn.init.uniform_(self.convs[0].bias, -(1. / d) ** 0.5, (1. / d) ** 0.5)
+
+    def forward(
+            self,
+            image: torch.Tensor,
+            feature_pyramid: Sequence[torch.Tensor],
+            upsample: bool = True
+    ) -> torch.Tensor:
+        assert len(feature_pyramid) == len(self.convs)
+
+        feature_pyramid = [conv(x) for x, conv in zip(feature_pyramid, self.convs)]
+
+        x = feature_pyramid.pop()
+        while feature_pyramid:
+            x = F.interpolate(x, scale_factor=2, mode='trilinear')
+            y = feature_pyramid.pop()
+            x = crop_and_pad_to(x, y)
+            x = x + y
+
+        if not upsample:
+            return x
+
+        # upsample and pad logits to the original images' spatial resolution
+        x = F.interpolate(x, scale_factor=self.stem_stride, mode='trilinear')
+        if x.shape[2:] != image.shape[2:]:
+            x = crop_and_pad_to(x, image)
+
+        return x
 
 
 def crop_and_pad_to(x: torch.Tensor, other: torch.Tensor, pad_mode: str = 'replicate') -> torch.Tensor:
