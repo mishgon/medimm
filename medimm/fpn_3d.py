@@ -154,12 +154,9 @@ class FPN3d(nn.Module):
 
         assert len(out_channels) == len(depths)
 
-        if isinstance(stem_stride, int):
-            stem_stride = (stem_stride, stem_stride, stem_stride)
-        stem_stride = tuple(stem_stride)
-
-        if stem_kernel_size is None:
-            stem_kernel_size = stem_stride
+        stem_stride = _to_tuple(stem_stride)
+        stem_kernel_size = _to_tuple(stem_kernel_size) if stem_kernel_size is not None else stem_stride
+        stem_padding = _to_tuple(stem_padding)
 
         left_depths = [d for d, _ in depths[:-1]] + [depths[-1]]
         drop_path_rates = torch.linspace(0, drop_path_rate, sum(left_depths)).split(left_depths)
@@ -202,7 +199,7 @@ class FPN3d(nn.Module):
         if any(image.shape[i] < self.max_stride[i] for i in [-3, -2, -1]):
             raise ValueError(f"Input's spatial size {x.shape[-3:]} is less than {self.max_stride}.")
 
-        if mask is not None and mask.dtype != x.dtype:
+        if mask is not None and mask.dtype != image.dtype:
             raise TypeError("``mask`` must have the same dtype as input image ``x``")
 
         # stem
@@ -224,7 +221,7 @@ class FPN3d(nn.Module):
         for i in reversed(range(len(self.up_blocks))):
             x = self.up_blocks[i](x)
             y = self.skip_connections[i](feature_pyramid[i])
-            x = crop_and_pad_to(x, y)
+            x = _crop_and_pad_to(x, y)
             x = x + y
             x = self.right_stages[i](x)
             feature_pyramid[i] = self.final_acts[i](self.final_norms[i](x))
@@ -244,9 +241,7 @@ class FPNDenseHead3d(nn.Module):
     ) -> None:
         super().__init__()
 
-        if isinstance(fpn_stem_stride, int):
-            fpn_stem_stride = (fpn_stem_stride, fpn_stem_stride, fpn_stem_stride)
-        self.fpn_stem_stride = tuple(fpn_stem_stride)
+        self.fpn_stem_stride = _to_tuple(fpn_stem_stride)
 
         self.lateral_convs = nn.ModuleList([
             nn.Sequential(
@@ -289,7 +284,7 @@ class FPNDenseHead3d(nn.Module):
         for i in reversed(range(len(feature_pyramid) - 1)):
             x = F.interpolate(feature_pyramid[i + 1], scale_factor=2)
             y = feature_pyramid[i]
-            feature_pyramid[i] = y + crop_and_pad_to(x, y)
+            feature_pyramid[i] = y + _crop_and_pad_to(x, y)
 
         feature_pyramid = [conv(stage(x)) for x, stage, conv in zip(feature_pyramid, self.stages, self.final_convs)]
 
@@ -297,7 +292,7 @@ class FPNDenseHead3d(nn.Module):
         while feature_pyramid:
             x = F.interpolate(x, scale_factor=2, mode='trilinear')
             y = feature_pyramid.pop()
-            x = crop_and_pad_to(x, y)
+            x = _crop_and_pad_to(x, y)
             x = x + y
 
         if not upsample:
@@ -306,7 +301,7 @@ class FPNDenseHead3d(nn.Module):
         # upsample and pad logits to the original images' spatial resolution
         x = F.interpolate(x, scale_factor=self.fpn_stem_stride, mode='trilinear')
         if x.shape[2:] != image.shape[2:]:
-            x = crop_and_pad_to(x, image)
+            x = _crop_and_pad_to(x, image)
 
         return x
 
@@ -315,14 +310,12 @@ class FPNLinearDenseHead3d(nn.Module):
     def __init__(
             self,
             out_channels: int,
-            fpn_stem_stride: int,
+            fpn_stem_stride: Union[int, Tuple[int, int, int]],
             fpn_out_channels: Sequence[int],
     ) -> None:
         super().__init__()
 
-        if isinstance(fpn_stem_stride, int):
-            fpn_stem_stride = (fpn_stem_stride, fpn_stem_stride, fpn_stem_stride)
-        self.fpn_stem_stride = tuple(fpn_stem_stride)
+        self.fpn_stem_stride = _to_tuple(fpn_stem_stride)
 
         self.convs = nn.ModuleList([
             nn.Conv3d(c, out_channels, kernel_size=1, bias=(i == 0))
@@ -347,21 +340,21 @@ class FPNLinearDenseHead3d(nn.Module):
         while feature_pyramid:
             x = F.interpolate(x, scale_factor=2, mode='trilinear')
             y = feature_pyramid.pop()
-            x = crop_and_pad_to(x, y)
+            x = _crop_and_pad_to(x, y)
             x = x + y
 
         if not upsample:
             return x
 
         # upsample and pad logits to the original images' spatial resolution
-        x = F.interpolate(x, scale_factor=self.stem_stride, mode='trilinear')
+        x = F.interpolate(x, scale_factor=self.fpn_stem_stride, mode='trilinear')
         if x.shape[2:] != image.shape[2:]:
-            x = crop_and_pad_to(x, image)
+            x = _crop_and_pad_to(x, image)
 
         return x
 
 
-def crop_and_pad_to(x: torch.Tensor, other: torch.Tensor, pad_mode: str = 'replicate') -> torch.Tensor:
+def _crop_and_pad_to(x: torch.Tensor, other: torch.Tensor, pad_mode: str = 'replicate') -> torch.Tensor:
     assert x.ndim == other.ndim == 5
 
     # crop
@@ -374,3 +367,13 @@ def crop_and_pad_to(x: torch.Tensor, other: torch.Tensor, pad_mode: str = 'repli
     x = F.pad(x, pad, mode=pad_mode)
 
     return x
+
+
+def _to_tuple(int_or_seq: Union[int, Sequence[int]]) -> Tuple[int, int, int]:
+    if isinstance(int_or_seq, int):
+        return (int_or_seq, int_or_seq, int_or_seq)
+    else:
+        assert len(int_or_seq) == 3
+
+        return tuple(int_or_seq)
+    
