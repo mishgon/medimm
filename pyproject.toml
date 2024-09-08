@@ -33,7 +33,7 @@ Homepage = "https://github.com/mishgon/medimm"
 Issues = "https://github.com/mishgon/medimm/issues"
 
 [tool.setuptools]
-packages = ["medimm"]
+packages = ["medimm", "medimm.layers"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
