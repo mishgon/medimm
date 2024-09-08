@@ -137,10 +137,10 @@ class ConvNeXtStage3d(nn.Module):
 class FPN3d(nn.Module):
     def __init__(
             self,
-            in_channels: int,
-            stem_stride: Union[int, Tuple[int, int, int]],
-            out_channels: Sequence[int],
-            depths: Sequence[Union[int, Tuple[int, int]]],
+            in_channels: int = 1,
+            stem_stride: Union[int, Tuple[int, int, int]] = (4, 4, 2),
+            out_channels: Sequence[int] = (96, 192, 384, 768),
+            depths: Sequence[Union[int, Tuple[int, int]]] = ((3, 1), (3, 1), (9, 1), 3),
             stem_kernel_size: Optional[Union[int, Tuple[int, int, int]]] = None,
             stem_padding: Union[int, Tuple[int, int, int]] = 0,
             drop_path_rate: float = 0.0,
