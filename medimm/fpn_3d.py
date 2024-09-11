@@ -10,6 +10,22 @@ from medimm.layers.norm import LayerNorm3d, GlobalResponseNorm3d
 from medimm.layers.layer_scale import LayerScale3d
 
 
+def fpn3d_base():
+    model = FPN3d(
+        in_channels=1,
+        stem_stride=(4, 4, 2),
+        out_channels=(128, 256, 512, 1024),
+        depths=((3, 1), (3, 1), (27, 1), 3),
+        stem_kernel_size=(4, 4, 2),
+        drop_path_rate=0.1,
+        final_ln=True,
+        final_affine=True,
+        final_gelu=False,
+        mask_token=True
+    )
+    return model
+
+
 class Stem3d(nn.Module):
     def __init__(
             self,
@@ -376,4 +392,3 @@ def _to_tuple(int_or_seq: Union[int, Sequence[int]]) -> Tuple[int, int, int]:
         assert len(int_or_seq) == 3
 
         return tuple(int_or_seq)
-    
