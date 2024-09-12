@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "medimm"
-version = "0.0.4"
+version = "0.0.5"
 dynamic = ["dependencies"]
 requires-python = ">=3.10"
 authors = [
@@ -33,7 +33,7 @@ Homepage = "https://github.com/mishgon/medimm"
 Issues = "https://github.com/mishgon/medimm/issues"
 
 [tool.setuptools.packages.find]
-where = ["medimm"]
+include = ["medimm"]
 namespaces = false
 
 [tool.setuptools.dynamic]
