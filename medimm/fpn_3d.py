@@ -237,7 +237,7 @@ class FPN3d(nn.Module):
         for i in reversed(range(len(self.up_blocks))):
             x = self.up_blocks[i](x)
             y = self.skip_connections[i](feature_pyramid[i])
-            x = _crop_and_pad_to(x, y)
+            x = crop_and_pad_to(x, y)
             x = x + y
             x = self.right_stages[i](x)
             feature_pyramid[i] = self.final_acts[i](self.final_norms[i](x))
@@ -300,7 +300,7 @@ class FPNDenseHead3d(nn.Module):
         for i in reversed(range(len(feature_pyramid) - 1)):
             x = F.interpolate(feature_pyramid[i + 1], scale_factor=2)
             y = feature_pyramid[i]
-            feature_pyramid[i] = y + _crop_and_pad_to(x, y)
+            feature_pyramid[i] = y + crop_and_pad_to(x, y)
 
         feature_pyramid = [conv(stage(x)) for x, stage, conv in zip(feature_pyramid, self.stages, self.final_convs)]
 
@@ -308,7 +308,7 @@ class FPNDenseHead3d(nn.Module):
         while feature_pyramid:
             x = F.interpolate(x, scale_factor=2, mode='trilinear')
             y = feature_pyramid.pop()
-            x = _crop_and_pad_to(x, y)
+            x = crop_and_pad_to(x, y)
             x = x + y
 
         if not upsample:
@@ -317,7 +317,7 @@ class FPNDenseHead3d(nn.Module):
         # upsample and pad logits to the original images' spatial resolution
         x = F.interpolate(x, scale_factor=self.fpn_stem_stride, mode='trilinear')
         if x.shape[2:] != image.shape[2:]:
-            x = _crop_and_pad_to(x, image)
+            x = crop_and_pad_to(x, image)
 
         return x
 
@@ -356,7 +356,7 @@ class FPNLinearDenseHead3d(nn.Module):
         while feature_pyramid:
             x = F.interpolate(x, scale_factor=2, mode='trilinear')
             y = feature_pyramid.pop()
-            x = _crop_and_pad_to(x, y)
+            x = crop_and_pad_to(x, y)
             x = x + y
 
         if not upsample:
@@ -365,12 +365,12 @@ class FPNLinearDenseHead3d(nn.Module):
         # upsample and pad logits to the original images' spatial resolution
         x = F.interpolate(x, scale_factor=self.fpn_stem_stride, mode='trilinear')
         if x.shape[2:] != image.shape[2:]:
-            x = _crop_and_pad_to(x, image)
+            x = crop_and_pad_to(x, image)
 
         return x
 
 
-def _crop_and_pad_to(x: torch.Tensor, other: torch.Tensor, pad_mode: str = 'replicate') -> torch.Tensor:
+def crop_and_pad_to(x: torch.Tensor, other: torch.Tensor, pad_mode: str = 'replicate') -> torch.Tensor:
     assert x.ndim == other.ndim == 5
 
     # crop
