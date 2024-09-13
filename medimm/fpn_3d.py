@@ -15,6 +15,7 @@ def fpn3d_base():
         in_channels=1,
         stem_stride=(4, 4, 2),
         out_channels=(128, 256, 512, 1024),
+        hidden_factors=4.0,
         depths=((3, 1), (3, 1), (27, 1), 3),
         stem_kernel_size=(4, 4, 2),
         drop_path_rate=0.1,
@@ -156,6 +157,7 @@ class FPN3d(nn.Module):
             in_channels: int = 1,
             stem_stride: Union[int, Tuple[int, int, int]] = (4, 4, 2),
             out_channels: Sequence[int] = (96, 192, 384, 768),
+            hidden_factors: Union[float, Sequence[float]] = 4.0,
             depths: Sequence[Union[int, Tuple[int, int]]] = ((3, 1), (3, 1), (9, 1), 3),
             stem_kernel_size: Optional[Union[int, Tuple[int, int, int]]] = None,
             stem_padding: Union[int, Tuple[int, int, int]] = 0,
@@ -169,6 +171,9 @@ class FPN3d(nn.Module):
         super().__init__()
 
         assert len(out_channels) == len(depths)
+
+        if isinstance(hidden_factors, float):
+            hidden_factors = [hidden_factors for _ in range(len(out_channels))] 
 
         stem_stride = _to_tuple(stem_stride)
         stem_kernel_size = _to_tuple(stem_kernel_size) if stem_kernel_size is not None else stem_stride
@@ -188,8 +193,10 @@ class FPN3d(nn.Module):
         self.right_stages = nn.ModuleList([])
         self.final_norms = nn.ModuleList([])
         self.final_acts = nn.ModuleList([])
-        for c_1, c_2, (d_1, d_2), dp_rates in zip(out_channels, out_channels[1:], depths, drop_path_rates):
-            self.left_stages.append(ConvNeXtStage3d(c_1, d_1, dp_rates, **convnext_block_kwargs))
+        for c_1, h, c_2, (d_1, d_2), dp_rates in zip(
+                out_channels, hidden_factors, out_channels[1:], depths, drop_path_rates
+        ):
+            self.left_stages.append(ConvNeXtStage3d(c_1, d_1, dp_rates, hidden_factor=h, **convnext_block_kwargs))
             self.middle_norms.append(LayerNorm3d(c_1))
             self.down_blocks.append(nn.Conv3d(c_1, c_2, kernel_size=2, stride=2))
             self.up_blocks.append(
@@ -199,7 +206,7 @@ class FPN3d(nn.Module):
                 )
             )
             self.skip_connections.append(nn.Conv3d(c_1, c_1, kernel_size=1))
-            self.right_stages.append(ConvNeXtStage3d(c_1, d_2, **convnext_block_kwargs))
+            self.right_stages.append(ConvNeXtStage3d(c_1, d_2, hidden_factor=h, **convnext_block_kwargs))
             self.final_norms.append(LayerNorm3d(c_1, affine=final_affine) if final_ln else nn.Identity())
             self.final_acts.append(nn.GELU() if final_gelu else nn.Identity())
 
