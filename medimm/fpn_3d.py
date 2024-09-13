@@ -88,11 +88,9 @@ class ConvNeXtBlock3d(nn.Module):
 
         hidden_channels = int(in_channels * hidden_factor)
         self.conv_1 = nn.Conv3d(in_channels, in_channels, kernel_size, padding='same', groups=in_channels)
-        self.norm_1 = LayerNorm3d(in_channels)
-        self.act_1 = nn.GELU()
+        self.norm = LayerNorm3d(in_channels)
         self.conv_2 = nn.Conv3d(in_channels, hidden_channels, kernel_size=1)
-        self.norm_2 = LayerNorm3d(hidden_channels)
-        self.act_2 = nn.GELU()
+        self.act = nn.GELU()
         self.grn = GlobalResponseNorm3d(hidden_channels) if grn else nn.Identity()
         self.dropout = nn.Dropout(dropout_rate) if dropout_rate > 0 else nn.Identity()
         self.conv_3 = nn.Conv3d(hidden_channels, out_channels, kernel_size=1)
@@ -107,11 +105,9 @@ class ConvNeXtBlock3d(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         input_ = x
         x = self.conv_1(x)
-        x = self.norm_1(x)
-        x = self.act_1(x)
+        x = self.norm(x)
         x = self.conv_2(x)
-        x = self.norm_2(x)
-        x = self.act_2(x)
+        x = self.act(x)
         x = self.grn(x)
         x = self.dropout(x)
         x = self.conv_3(x)
@@ -210,7 +206,8 @@ class FPN3d(nn.Module):
             self.final_norms.append(LayerNorm3d(c_1, affine=final_affine) if final_ln else nn.Identity())
             self.final_acts.append(nn.GELU() if final_gelu else nn.Identity())
 
-        self.bottom_stage = ConvNeXtStage3d(out_channels[-1], depths[-1], drop_path_rates[-1], **convnext_block_kwargs)
+        self.bottom_stage = ConvNeXtStage3d(out_channels[-1], depths[-1], drop_path_rates[-1],
+                                            hidden_factor=hidden_factors[-1], **convnext_block_kwargs)
         self.final_norms.append(LayerNorm3d(out_channels[-1], affine=final_affine) if final_ln else nn.Identity())
         self.final_acts.append(nn.GELU() if final_gelu else nn.Identity())
 
