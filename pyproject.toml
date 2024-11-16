@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "medimm"
-version = "0.0.7"
+version = "0.0.8"
 dynamic = ["dependencies"]
 requires-python = ">=3.10"
 authors = [
@@ -13,7 +13,7 @@ authors = [
 description = "PyTorch Medical 3D Image Models"
 readme = "README.md"
 license = {file = "LICENSE"}
-keywords=["medical computer vision", "deep learning", "pytorch"]
+keywords = ["medical computer vision", "deep learning", "pytorch"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
