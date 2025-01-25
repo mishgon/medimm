@@ -83,7 +83,7 @@ class UNet3d(nn.Module):
                 )
             )
 
-    def forward(self, image: torch.Tensor, mask: Optional[torch.Tensor] = None) -> List[torch.Tensor]:
+    def forward(self, image: torch.Tensor, mask: Optional[torch.Tensor] = None) -> UNet3dOutput:
         if any(image.shape[i] < 2 ** (len(self.encoder_stages) - 1) for i in [-3, -2, -1]):
             raise ValueError(f"Input's spatial size {x.shape[-3:]} is less than {self.max_stride}.")
 
