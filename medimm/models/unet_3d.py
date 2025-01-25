@@ -50,15 +50,8 @@ class UNetBlock3d(nn.Module):
 
 
 class UNet3d(nn.Module):
-    def __init__(
-            self,
-            in_channels: int = 1,
-            channels: Sequence[int] = (32, 64, 128, 256, 512, 1024),
-            depths: Sequence[Union[int, Tuple[int, int]]] = (1, 1, 2, 2, 4, 4),
-    ) -> None:
+    def __init__(self, config: UNet3dConfig) -> None:
         super().__init__()
-
-        assert len(channels) == len(depths)
 
         self.encoder_stages = nn.ModuleList([])
         self.decoder_ups = nn.ModuleList([])
@@ -66,27 +59,27 @@ class UNet3d(nn.Module):
 
         self.encoder_stages.append(
             nn.Sequential(
-                UNetBlock3d(in_channels + 1, channels[0], stride=1),
-                *[UNetBlock3d(channels[0], channels[0]) for _ in range(depths[0] - 1)]
+                UNetBlock3d(config.in_channels + 1, config.channels[0], stride=1),
+                *[UNetBlock3d(config.channels[0], config.channels[0]) for _ in range(config.depths[0] - 1)]
             )
         )
-        for i in range(len(channels) - 1):
+        for i in range(len(config.channels) - 1):
             self.encoder_stages.append(
                 nn.Sequential(
-                    UNetBlock3d(channels[i], channels[i + 1], stride=2),
-                    *[UNetBlock3d(channels[i + 1], channels[i + 1]) for _ in range(depths[i + 1] - 1)]
+                    UNetBlock3d(config.channels[i], config.channels[i + 1], stride=2),
+                    *[UNetBlock3d(config.channels[i + 1], config.channels[i + 1]) for _ in range(config.depths[i + 1] - 1)]
                 )
             )
             self.decoder_ups.append(
                 nn.Sequential(
                     nn.Upsample(scale_factor=2, mode='nearest'),
-                    nn.Conv3d(channels[i + 1], channels[i], kernel_size=1),
+                    nn.Conv3d(config.channels[i + 1], config.channels[i], kernel_size=1),
                 )
             )
             self.decoder_stages.append(
                 nn.Sequential(
-                    UNetBlock3d(channels[i] * 2, channels[i]),
-                    *[UNetBlock3d(channels[i], channels[i]) for _ in range(depths[i] - 1)]
+                    UNetBlock3d(config.channels[i] * 2, config.channels[i]),
+                    *[UNetBlock3d(config.channels[i], config.channels[i]) for _ in range(config.depths[i] - 1)]
                 )
             )
 
