@@ -11,7 +11,7 @@ class UNet3dConfig(NamedTuple):
     depths: Sequence[int] = (1, 1, 2, 2, 4, 4)
 
 
-class UNet3dOutput(nn.Module):
+class UNet3dOutput(NamedTuple):
     feature_maps: torch.Tensor
     feature_pyramid: List[torch.Tensor]
 
