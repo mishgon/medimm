@@ -7,12 +7,13 @@ import torch.nn.functional as F
 
 class UNet3dConfig(NamedTuple):
     in_channels: int = 1
-    channels: int = (32, 64, 128, 256, 512, 1024)
+    out_channels: int = 32
+    hidden_channels: int = (32, 64, 128, 256, 512, 1024)
     depths: Sequence[int] = (1, 1, 2, 2, 4, 4)
 
 
 class UNet3dOutput(NamedTuple):
-    feature_maps: torch.Tensor
+    output: torch.Tensor
     feature_pyramid: List[torch.Tensor]
 
 
@@ -59,29 +60,30 @@ class UNet3d(nn.Module):
 
         self.encoder_stages.append(
             nn.Sequential(
-                UNetBlock3d(config.in_channels + 1, config.channels[0], stride=1),
-                *[UNetBlock3d(config.channels[0], config.channels[0]) for _ in range(config.depths[0] - 1)]
+                UNetBlock3d(config.in_channels + 1, config.hidden_channels[0], stride=1),
+                *[UNetBlock3d(config.hidden_channels[0], config.hidden_channels[0]) for _ in range(config.depths[0] - 1)]
             )
         )
-        for i in range(len(config.channels) - 1):
+        for i in range(len(config.hidden_channels) - 1):
             self.encoder_stages.append(
                 nn.Sequential(
-                    UNetBlock3d(config.channels[i], config.channels[i + 1], stride=2),
-                    *[UNetBlock3d(config.channels[i + 1], config.channels[i + 1]) for _ in range(config.depths[i + 1] - 1)]
+                    UNetBlock3d(config.hidden_channels[i], config.hidden_channels[i + 1], stride=2),
+                    *[UNetBlock3d(config.hidden_channels[i + 1], config.hidden_channels[i + 1]) for _ in range(config.depths[i + 1] - 1)]
                 )
             )
             self.decoder_ups.append(
                 nn.Sequential(
                     nn.Upsample(scale_factor=2, mode='nearest'),
-                    nn.Conv3d(config.channels[i + 1], config.channels[i], kernel_size=1),
+                    nn.Conv3d(config.hidden_channels[i + 1], config.hidden_channels[i], kernel_size=1),
                 )
             )
             self.decoder_stages.append(
                 nn.Sequential(
-                    UNetBlock3d(config.channels[i] * 2, config.channels[i]),
-                    *[UNetBlock3d(config.channels[i], config.channels[i]) for _ in range(config.depths[i] - 1)]
+                    UNetBlock3d(config.hidden_channels[i] * 2, config.hidden_channels[i]),
+                    *[UNetBlock3d(config.hidden_channels[i], config.hidden_channels[i]) for _ in range(config.depths[i] - 1)]
                 )
             )
+        self.final_conv = nn.Conv3d(config.hidden_channels[0], config.out_channels, kernel_size=1)
 
     def forward(self, image: torch.Tensor, mask: Optional[torch.Tensor] = None) -> UNet3dOutput:
         if any(image.shape[i] < 2 ** (len(self.encoder_stages) - 1) for i in [-3, -2, -1]):
@@ -110,7 +112,10 @@ class UNet3d(nn.Module):
             x = self.decoder_stages[i](x)
             feature_pyramid[i] = x
 
-        return UNet3dOutput(x, feature_pyramid)
+        # final conv
+        output = self.final_conv(x)
+
+        return UNet3dOutput(output, feature_pyramid)
 
 
 def crop_and_pad_to(x: torch.Tensor, other: torch.Tensor, pad_mode: str = 'replicate') -> torch.Tensor:
