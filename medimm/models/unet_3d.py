@@ -1,4 +1,4 @@
-from typing import NamedTuple, Optional, List, Union, Tuple, Sequence
+from typing import NamedTuple, List, Union, Tuple, Sequence
 
 import torch
 import torch.nn as nn
@@ -60,7 +60,7 @@ class UNet3d(nn.Module):
 
         self.encoder_stages.append(
             nn.Sequential(
-                UNetBlock3d(config.in_channels + 1, config.hidden_channels[0], stride=1),
+                UNetBlock3d(config.in_channels, config.hidden_channels[0], stride=1),
                 *[UNetBlock3d(config.hidden_channels[0], config.hidden_channels[0]) for _ in range(config.depths[0] - 1)]
             )
         )
@@ -85,19 +85,12 @@ class UNet3d(nn.Module):
             )
         self.final_conv = nn.Conv3d(config.hidden_channels[0], config.out_channels, kernel_size=1)
 
-    def forward(self, image: torch.Tensor, mask: Optional[torch.Tensor] = None) -> UNet3dOutput:
+    def forward(self, image: torch.Tensor) -> UNet3dOutput:
         if any(image.shape[i] < 2 ** (len(self.encoder_stages) - 1) for i in [-3, -2, -1]):
             raise ValueError(f"Input's spatial size {x.shape[-3:]} is less than {self.max_stride}.")
 
-        if mask is None:
-            n, _, h, w, d = image.shape
-            mask = torch.ones((n, h, w, d), dtype=image.dtype, device=image.device)
-        elif mask.dtype != image.dtype:
-            raise TypeError("``mask`` must have the same dtype as input image ``x``")
-        mask = mask.unsqueeze(1)
-        x = torch.cat([image * mask, mask], dim=1)
-
         # encoder
+        x = image
         feature_pyramid = []
         for stage in self.encoder_stages:
             x = stage(x)
