@@ -1,4 +1,4 @@
-from typing import NamedTuple, Tuple, List, Literal
+from typing import NamedTuple, Tuple, List, Optional
 
 import torch
 import torch.nn as nn
@@ -22,10 +22,10 @@ class ViT3dConfig(NamedTuple):
 
 class ViT3dOutput(NamedTuple):
     cls_token: torch.Tensor
-    reg_tokens: torch.Tensor
+    reg_tokens: Optional[torch.Tensor]
     patch_tokens: torch.Tensor
     intermediate_cls_tokens: List[torch.Tensor]
-    intermediate_reg_tokens: List[torch.Tensor]
+    intermediate_reg_tokens: Optional[List[torch.Tensor]]
     intermediate_patch_tokens: List[torch.Tensor]
 
 
@@ -55,8 +55,8 @@ class ViT3d(nn.Module):
         num_pos_embeds = 1 + config.num_registers + num_patches if not config.patch_pos_embed_only else num_patches
 
         self.patch_embed = PatchEmbed3d(config)
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, config.embed_dim))
-        self.reg_token = nn.Parameter(torch.zeros(1, config.num_registers, config.embed_dim)) if config.num_registers > 0 else None
+        self.cls_token = nn.Parameter(torch.randn(1, 1, config.embed_dim) * 0.02)
+        self.reg_token = nn.Parameter(torch.randn(1, config.num_registers, config.embed_dim) * 0.02) if config.num_registers > 0 else None
         self.pos_embed = nn.Parameter(torch.randn(1, num_pos_embeds, config.embed_dim) * 0.02)
 
         drop_path_rates = torch.linspace(0, config.drop_path_rate, config.depth).tolist()
@@ -75,9 +75,10 @@ class ViT3d(nn.Module):
         self._num_patches = num_patches
         self._grid_size = grid_size
 
-    def forward(self, image: torch.Tensor) -> torch.Tensor:
+    def forward(self, image: torch.Tensor) -> ViT3dOutput:
+        batch_size = image.size(0)
+
         x = self.patch_embed(image)
-        batch_size = x.size(0)
 
         to_cat = []
         to_cat.append(self.cls_token.expand(batch_size, -1, -1))
@@ -96,7 +97,7 @@ class ViT3d(nn.Module):
             x = block(x)
 
             cls_token, reg_tokens, patch_tokens = x.split((1, self.config.num_registers, self._num_patches), dim=1)
-            cls_token = cls_token.squeeze(dim=1)
+            cls_token = cls_token.squeeze(1)
             patch_tokens = patch_tokens.movedim(1, -1).view(batch_size, self.config.embed_dim, *self._grid_size)
 
             intermediate_cls_tokens.append(cls_token)
@@ -106,8 +107,12 @@ class ViT3d(nn.Module):
         x = self.norm(x)
 
         cls_token, reg_tokens, patch_tokens = x.split((1, self.config.num_registers, self._num_patches), dim=1)
-        cls_token = cls_token.squeeze(dim=1)
+        cls_token = cls_token.squeeze(1)
         patch_tokens = patch_tokens.movedim(1, -1).view(batch_size, self.config.embed_dim, *self._grid_size)
+
+        if self.reg_token is None:
+            reg_tokens = None
+            intermediate_reg_tokens = None
 
         return ViT3dOutput(cls_token, reg_tokens, patch_tokens, intermediate_cls_tokens,
                            intermediate_reg_tokens, intermediate_patch_tokens)
