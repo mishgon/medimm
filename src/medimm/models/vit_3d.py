@@ -8,7 +8,7 @@ from timm.layers.helpers import to_3tuple
 
 
 class ViT3dConfig(NamedTuple):
-    image_size: Tuple[int, int, int] = (128, 128, 128)
+    image_size: Tuple[int, int, int] = (160, 160, 160)
     patch_size: int = 16
     in_channels: int = 1
     embed_dim: int = 768
@@ -50,6 +50,10 @@ class ViT3d(nn.Module):
 
         image_size = to_3tuple(config.image_size)
         patch_size = to_3tuple(config.patch_size)
+
+        if not all(s % p == 0 for s, p in zip(image_size, patch_size)):
+            raise ValueError('Image size must be divisible by patch size')
+
         grid_size = tuple(s // p for s, p in zip(image_size, patch_size))
         num_patches = grid_size[0] * grid_size[1] * grid_size[2]
         num_pos_embeds = 1 + config.num_registers + num_patches if not config.patch_pos_embed_only else num_patches
