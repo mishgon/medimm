@@ -13,7 +13,7 @@ from medimm.layers.layer_scale import LayerScale3d
 
 class UNet3dConfig(NamedTuple):
     in_channels: int = 1
-    hidden_channels: int = (32, 64, 128, 256, 512, 1024)
+    hidden_channels: int = (16, 32, 64, 128, 256, 512)
     depths: Sequence[int] = (1, 1, 2, 2, 4, 4)
     num_attn_heads: int = 8
     time_embed_dim: int = 1024
@@ -191,8 +191,6 @@ class UNet3d(nn.Module):
                 )
             )
 
-        self.final_lns = nn.ModuleList([LayerNorm3d(c) for c in config.hidden_channels])
-
     def forward(self, image: torch.Tensor, t: Union[float, torch.Tensor] = 1.0) -> UNet3dOutput:
         if any(image.shape[i] < 2 ** (len(self.encoder_stages) - 1) for i in [-3, -2, -1]):
             raise ValueError(f"Input's spatial size {x.shape[-3:]} is less than {self.max_stride}.")
@@ -244,31 +242,15 @@ def crop_and_pad_to(x: torch.Tensor, other: torch.Tensor, pad_mode: str = 'repli
     return x
 
 
-UNet3dSize = Literal['pico', 'nano', 'tiny', 'small', 'base', 'large', 'xlarge', 'xxlarge']
+UNet3dSize = Literal['tiny', 'small', 'base', 'large', 'xlarge', 'xxlarge']
 
 
 def unet3d(size: UNet3dSize, **kwargs) -> UNet3d:
     return globals()[f'unet3d_{size}'](**kwargs)
 
 
-def unet3d_pico(**kwargs) -> UNet3d:
-    config = UNet3dConfig(hidden_channels=(8, 16, 32, 64, 128, 256), num_attn_heads=2, time_embed_dim=256)
-    if kwargs:
-        config = config._replace(**kwargs)
-    model = UNet3d(config)
-    return model
-
-
-def unet3d_nano(**kwargs) -> UNet3d:
-    config = UNet3dConfig(hidden_channels=(12, 24, 48, 96, 192, 384), num_attn_heads=3, time_embed_dim=384)
-    if kwargs:
-        config = config._replace(**kwargs)
-    model = UNet3d(config)
-    return model
-
-
 def unet3d_tiny(**kwargs) -> UNet3d:
-    config = UNet3dConfig(hidden_channels=(16, 32, 64, 128, 256, 512), num_attn_heads=4, time_embed_dim=512)
+    config = UNet3dConfig(hidden_channels=(8, 16, 32, 64, 128, 256), num_attn_heads=4, time_embed_dim=512)
     if kwargs:
         config = config._replace(**kwargs)
     model = UNet3d(config)
@@ -276,7 +258,7 @@ def unet3d_tiny(**kwargs) -> UNet3d:
 
 
 def unet3d_small(**kwargs) -> UNet3d:
-    config = UNet3dConfig(hidden_channels=(24, 48, 96, 192, 384, 768), num_attn_heads=6, time_embed_dim=768)
+    config = UNet3dConfig(hidden_channels=(12, 24, 48, 96, 192, 384), num_attn_heads=6, time_embed_dim=768)
     if kwargs:
         config = config._replace(**kwargs)
     model = UNet3d(config)
@@ -284,7 +266,7 @@ def unet3d_small(**kwargs) -> UNet3d:
 
 
 def unet3d_base(**kwargs) -> UNet3d:
-    config = UNet3dConfig(hidden_channels=(32, 64, 128, 256, 512, 1024), num_attn_heads=8, time_embed_dim=1024)
+    config = UNet3dConfig(hidden_channels=(16, 32, 64, 128, 256, 512), num_attn_heads=8, time_embed_dim=1024)
     if kwargs:
         config = config._replace(**kwargs)
     model = UNet3d(config)
@@ -292,7 +274,7 @@ def unet3d_base(**kwargs) -> UNet3d:
 
 
 def unet3d_large(**kwargs) -> UNet3d:
-    config = UNet3dConfig(hidden_channels=(48, 96, 192, 384, 768, 1536), num_attn_heads=12, time_embed_dim=1536)
+    config = UNet3dConfig(hidden_channels=(24, 48, 96, 192, 384, 768), num_attn_heads=12, time_embed_dim=1536)
     if kwargs:
         config = config._replace(**kwargs)
     model = UNet3d(config)
@@ -300,7 +282,7 @@ def unet3d_large(**kwargs) -> UNet3d:
 
 
 def unet3d_xlarge(**kwargs) -> UNet3d:
-    config = UNet3dConfig(hidden_channels=(64, 128, 256, 512, 1024, 2048), num_attn_heads=16, time_embed_dim=2048)
+    config = UNet3dConfig(hidden_channels=(32, 64, 128, 256, 512, 1024), num_attn_heads=16, time_embed_dim=2048)
     if kwargs:
         config = config._replace(**kwargs)
     model = UNet3d(config)
@@ -308,51 +290,8 @@ def unet3d_xlarge(**kwargs) -> UNet3d:
 
 
 def unet3d_xxlarge(**kwargs) -> UNet3d:
-    config = UNet3dConfig(hidden_channels=(96, 192, 384, 768, 1536, 3072), num_attn_heads=24, time_embed_dim=3072)
+    config = UNet3dConfig(hidden_channels=(48, 96, 192, 384, 768, 1536), num_attn_heads=24, time_embed_dim=3072)
     if kwargs:
         config = config._replace(**kwargs)
     model = UNet3d(config)
-    return model
-
-
-def vox2vec_pico_i() -> UNet3d:
-    """
-    Example:
-    >>> image = crop_to_body(image)
-    >>> image = resize(image, voxel_spacing=(1.0, 1.0, 1.5))
-    >>> image = rescale(image, hu_window=(-1350.0, 300.0))
-    >>> image = (image - 0.57) / 0.28  # normalization
-    >>> image = random_crop(image, crop_size=(96, 96, 64))  # use any crop size
-    >>> image = np.expand_dims(image, axis=0)  # (1, 96, 96, 64)
-    >>> image = torch.from_numpy(image)
-    >>> image = image.unsqueeze(0)  # (1, 1, 96, 96, 64)
-    >>> 
-    >>> model = vox2vec_pico_i()
-    >>>
-    >>> output = model(image)
-    >>> feature_pyramid = output.feature_pyramid  # [(1, 8, 96, 96, 64), (1, 16, 48, 48, 32), ..., (1, 256, 3, 3, 2)]
-    """
-    model = unet3d_pico()
-
-    pretrained_model_path = hf_hub_download(
-        repo_id='mishgon/vox2vec_v2',
-        filename='vox2vec_pico_i.pt'
-    )
-    model.load_state_dict(torch.load(pretrained_model_path))
-
-    return model
-
-
-
-def vox2vec_pico_c() -> UNet3d:
-    """See vox2vec_pico_i's docstring for example.
-    """
-    model = unet3d_pico()
-
-    pretrained_model_path = hf_hub_download(
-        repo_id='mishgon/vox2vec_v2',
-        filename='vox2vec_pico_c.pt'
-    )
-    model.load_state_dict(torch.load(pretrained_model_path))
-
     return model
