@@ -135,7 +135,7 @@ class UNet3d(nn.Module):
 
         self.config = config
 
-        self.stem_conv = nn.Conv3d(config.in_channels + 1, config.hidden_channels[0], kernel_size=3, padding=1)
+        self.stem_conv = nn.Conv3d(config.in_channels, config.hidden_channels[0], kernel_size=3, padding=1)
 
         self.time_embed = TimeEmbed(config.time_embed_dim)
 
@@ -191,21 +191,12 @@ class UNet3d(nn.Module):
                 )
             )
 
-    def forward(
-            self,
-            image: torch.Tensor,
-            mask: Optional[torch.Tensor] = None,
-            t: Union[float, torch.Tensor] = 1.0
-    ) -> UNet3dOutput:
+    def forward(self, image: torch.Tensor, t: Union[float, torch.Tensor] = 1.0) -> UNet3dOutput:
         if any(image.shape[i] < 2 ** (len(self.encoder_stages) - 1) for i in [-3, -2, -1]):
             raise ValueError(f"Input's spatial size {x.shape[-3:]} is less than {self.max_stride}.")
 
-        if mask is None:
-            n, _, h, w, s = image.shape
-            mask = torch.ones((n, 1, h, w, s), dtype=image.dtype, device=image.device)
-
         # first conv
-        x = self.stem_conv(torch.cat([image * mask, mask], dim=1))
+        x = self.stem_conv(image)
 
         # time embed
         if isinstance(t, float):
