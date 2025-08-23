@@ -13,6 +13,17 @@ class LayerNorm3d(nn.LayerNorm):
         return x
 
 
+class LayerNorm2d(nn.LayerNorm):
+    def __init__(self, channels: int, eps: float = 1e-6, affine: bool = True):
+        super().__init__(channels, eps=eps, elementwise_affine=affine)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.permute(0, 2, 3, 1)
+        x = super().forward(x)
+        x = x.permute(0, 3, 1, 2)
+        return x
+
+
 class GlobalResponseNorm3d(nn.Module):
     def __init__(self, channels: int, eps: float = 1e-6):
         super().__init__()
